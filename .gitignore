@@ -4,3 +4,4 @@ __pycache__/
 myenv/
 *.egg-info/
 pacman_agent.pth
+*.py~
