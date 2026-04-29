@@ -21,6 +21,10 @@ class Pacman(Entity):
         self.prev_pellet_dist = 0
         self.prev_scared_count = 0
         self.prev_direction = LEFT
+        # The last direction chosen by the agent, cached between node arrivals.
+        self.pending_direction = LEFT
+        # Counts frames since the agent was last queried for a new action.
+        self.frames_since_action = 0
 
     def reset(self):
         Entity.reset(self)
@@ -39,7 +43,16 @@ class Pacman(Entity):
         self.position += self.directions[self.direction]*self.speed*dt
 
         state = self.getState()
-        direction = self.agent.get_action(state)
+
+        # Only ask the agent for a new direction at node boundaries OR every 15 frames.
+        # Previously get_action was called every single frame, so with random exploration
+        # Pac-Man would reverse direction up to 60 times per second. Now reversals can
+        # still happen (mid-tile fleeing is valid), just much less frantically.
+        self.frames_since_action += 1
+        if self.overshotTarget() or self.frames_since_action >= 15:
+            self.pending_direction = self.agent.get_action(state)
+            self.frames_since_action = 0
+        direction = self.pending_direction
 
         if self.overshotTarget():
             self.node = self.target
@@ -119,23 +132,46 @@ class Pacman(Entity):
         self.ghosts = ghosts
 
     def getState(self):
+        # Builds the 30-number snapshot that the neural network reads every decision.
+        # All values are normalised to roughly the 0–1 range so the network treats
+        # every feature equally — without this, raw pixel coordinates (0–448) would
+        # drown out the 0/1 boolean flags during training.
         state = []
-        state.append(self.position.x)
-        state.append(self.position.y)
+
+        # Pac-Man's absolute position on the map, normalised by screen size.
+        state.append(self.position.x / SCREENWIDTH)
+        state.append(self.position.y / SCREENHEIGHT)
+
+        # For each of the 4 ghosts: relative offset from Pac-Man, scared flag,
+        # and ghost's current direction.
+        # Relative (dx/dy) rather than absolute is intentional — what matters is
+        # "ghost is 3 tiles to my left", not "ghost is at pixel 200".
+        # Ghost direction is normalised by 4.0 (max index in ACTIONS list).
         for ghost in self.ghosts:
             dx = ghost.position.x - self.position.x
             dy = ghost.position.y - self.position.y
             scared = 1 if ghost.mode.current == FREIGHT else 0
-            state.append(dx)
-            state.append(dy)
+            state.append(dx / SCREENWIDTH)
+            state.append(dy / SCREENHEIGHT)
             state.append(scared)
-            state.append(ACTIONS.index(ghost.direction) if ghost.direction in ACTIONS else 0)
+            state.append((ACTIONS.index(ghost.direction) if ghost.direction in ACTIONS else 0) / 4.0)
+
+        # Nearest pellet position — kept absolute (not relative) to avoid a full
+        # retrain. A minor inconsistency with ghost coords but not worth the cost.
         nearest = min(self.pellets.pelletList, key=lambda p: abs(self.position.x - p.position.x) + abs(self.position.y - p.position.y))
-        state.append(nearest.position.x)
-        state.append(nearest.position.y)
-        state.append(len(self.pellets.pelletList))
+        state.append(nearest.position.x / SCREENWIDTH)
+        state.append(nearest.position.y / SCREENHEIGHT)
+
+        # How many pellets are left, normalised by 300 (a safe upper bound).
+        state.append(len(self.pellets.pelletList) / 300.0)
+
+        # One-hot encoding of Pac-Man's current direction (5 values, one per action).
         for d in ACTIONS:
             state.append(1 if self.direction == d else 0)
+
+        # Which directions Pac-Man can physically move from the current node.
+        # Helps the network avoid trying to walk into walls.
         for d in [UP, DOWN, LEFT, RIGHT]:
             state.append(1 if self.node.neighbors[d] is not None else 0)
+
         return state

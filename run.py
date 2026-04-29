@@ -229,6 +229,8 @@ class GameController(object):
         self.textgroup.updateLevel(self.level)
 
     def restartGame(self):
+        self.agent.scores.append(self.score)
+        self.agent.on_game_end()
         print(f"Game over — score: {self.score}, epsilon: {self.pacman.agent.epsilon:.5f}, action_steps: {self.pacman.agent.action_steps}, train_steps: {self.pacman.agent.steps}")
         self.lives = 5
         self.level = 0
