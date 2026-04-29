@@ -26,13 +26,13 @@ The network never sees the pixels. Instead, every frame we hand it 30 numbers de
 Without normalisation, raw pixel coordinates (0–448) are hundreds of times larger than the 0/1 flags. The network would focus almost entirely on coordinates and basically ignore the boolean features. Normalising puts everything on the same scale so all features get a fair chance.
 
 **Why are ghost positions relative but pellet position absolute?**
-Ghost offsets (dx, dy from Pac-Man) are more useful than absolute positions — "ghost is 3 tiles to my left" generalises across the whole map. For the nearest pellet we kept absolute coordinates to avoid retraining from scratch (changing inputs breaks all existing weights). Minor inconsistency, acceptable trade-off.
+Ghost offsets (dx, dy from Pac-Man) are more useful than absolute positions — "ghost is 3 tiles to my left" generalises across the whole map. For the nearest pellet I kept absolute coordinates as minor inconsisteny because I have realised that after 10 hours of training and decided to have it as a possible future improvement.
 
 ---
 
 ## Reward shaping — what does the agent get points for?
 
-The agent doesn't just learn from the game score. We add extra signals to make learning faster:
+The agent doesn't just learn from the game score. I add extra signals to make learning faster:
 
 | Event | Reward |
 |---|---|
@@ -55,19 +55,9 @@ The direction-change penalty is small but discourages pointless oscillation. The
 - **High epsilon (e.g. 1.0):** fully random — the agent wanders everywhere and collects varied experience
 - **Low epsilon (e.g. 0.05):** mostly follows the network — only 5% random
 
-**The bug we fixed:** the original code decayed epsilon by `× 0.999` every single frame. At 60fps that meant epsilon hit its minimum (0.05) within the very first game — the agent had barely seen anything. From game 2 onward it was fully greedy with an untrained network, so it kept repeating the same bad behaviour.
+**The bug I made and fixed:** the original code decayed epsilon by `× 0.999` every single frame. At 60fps that meant epsilon hit its minimum (0.05) within the very first game — the agent had barely seen anything. From game 2 onward it was fully greedy with an untrained network, so it kept repeating the same bad behaviour.
 
 **The fix:** decay by `× 0.97` once per game end instead. Epsilon reaches 0.05 after roughly 110 games, giving the agent 100+ games of genuine exploration before it commits to what it's learned.
-
----
-
-## Replay buffer — why we don't train on the latest frame only
-
-If you trained the network on each frame as it happens, consecutive frames are nearly identical (Pac-Man barely moved). The network would overfit to the current situation and forget everything else.
-
-Instead, every frame we **store** the experience `(state, action, reward, next_state, done)` in a buffer. When training, we pull a random batch of 64 from the whole history. This breaks the correlation between samples and makes training much more stable.
-
-**Buffer size 50000** (up from the original 5000): with 50k memories the buffer holds experience from many different games and situations. 5000 was so small it filled up within a single game, losing older diverse memories immediately.
 
 ---
 
@@ -115,15 +105,3 @@ plt.plot(range(window-1, len(scores)), moving_avg, label="20-game avg")
 plt.legend()
 plt.show()
 ```
-
----
-
-## What to expect during training
-
-| Games | What you'll see |
-|---|---|
-| 1–50 | Random-looking movement, low scores. Normal — high epsilon. |
-| 50–150 | Scores become less random, moving average starts rising. |
-| 150+ | Epsilon is near minimum, agent exploits what it learned. Scores plateau or keep climbing. |
-
-If the moving average is still flat at game 200, the network probably needs more capacity (wider hidden layer) or better features.
